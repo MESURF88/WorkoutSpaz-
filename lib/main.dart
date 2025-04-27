@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'circular_buffer.dart';
 
 const String apiKey = String.fromEnvironment('RAPIDAPI_KEY');
 void main() {
@@ -176,6 +177,7 @@ class ExerciseSwipePage extends StatefulWidget {
 }
 
 class _ExerciseSwipePageState extends State<ExerciseSwipePage> with SingleTickerProviderStateMixin {
+  final recentExercises = CircularBuffer<String>(20);
   Map<String, dynamic>? currentExercise;
   bool isLoading = true;
   bool isFetchingNext = false; // NEW
@@ -196,6 +198,74 @@ class _ExerciseSwipePageState extends State<ExerciseSwipePage> with SingleTicker
   }
 
   Future<void> fetchRandomExercise({bool firstLoad = false}) async {
+    if (!firstLoad) {
+      setState(() {
+        isFetchingNext = true;
+      });
+    }
+    try {
+      final response = await http.get(
+        Uri.parse('${apiBase}exercises/target/${widget.target}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+
+        if (data.isNotEmpty) {
+          final random = Random();
+
+          // Build a list of exercises that are NOT in recentExercises
+          final availableExercises = data.where((exercise) {
+            final name = exercise['name'] as String?;
+            return name != null && !recentExercises.toList().contains(name);
+          }).toList();
+
+          Map<String, dynamic> randomExercise;
+
+          if (availableExercises.isNotEmpty) {
+            // Pick randomly from fresh exercises
+            randomExercise = availableExercises[random.nextInt(availableExercises.length)];
+          } else {
+            // All exercises have been used recently, fallback to random pick from full list
+            randomExercise = data[random.nextInt(data.length)];
+          }
+
+          // Add the selected exercise name to the circular buffer
+          if (randomExercise['name'] != null) {
+            recentExercises.add(randomExercise['name']);
+          }
+
+          setState(() {
+            currentExercise = Map<String, dynamic>.from(randomExercise);
+            isLoading = false;
+            swipeOffset = Offset.zero;
+            isFetchingNext = false;
+          });
+        } else {
+          setState(() {
+            errorMessage = 'No exercises found for target: ${widget.target}';
+            isLoading = false;
+            isFetchingNext = false;
+          });
+        }
+      } else {
+        setState(() {
+          errorMessage = 'Failed to load exercises (Status ${response.statusCode})';
+          isLoading = false;
+          isFetchingNext = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        errorMessage = 'Error fetching exercise: $e';
+        isLoading = false;
+        isFetchingNext = false;
+      });
+    }
+  }
+
+  Future<void> fetchRandomExerciseOrig({bool firstLoad = false}) async {
     if (!firstLoad) {
       setState(() {
         isFetchingNext = true;
